@@ -1,24 +1,17 @@
+from datetime import datetime
 import sqlite3
 import os
+import json
 
 DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'memoro.db')
 
-def create_connection():
+def save_note(content, summary, tags, embedding=None):
     conn = sqlite3.connect(DB_PATH)
-    return conn
-
-def create_tables():
-    conn = create_connection()
     c = conn.cursor()
+    timestamp = datetime.now().isoformat()
     c.execute('''
-        CREATE TABLE IF NOT EXISTS notes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            content TEXT,
-            summary TEXT,
-            timestamp TEXT,
-            tags TEXT,
-            embedding BLOB
-        )
-    ''')
+        INSERT INTO notes (content, summary, timestamp, tags, embedding)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (content, summary, timestamp, ','.join(tags), embedding))
     conn.commit()
     conn.close()
