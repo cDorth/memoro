@@ -19,8 +19,9 @@ HEADERS = {
     "Content-Type": "application/json",
 }
 
-MODEL_SUMMARY = "meta-llama/llama-3.3-8b-instruct:free"
-MODEL_TAGS = "nousresearch/deephermes-3-mistral-24b-preview:free"
+MODEL_SUMMARY = "meta-llama/llama-3.3-70b-instruct:free"
+MODEL_TAGS = "mistralai/mistral-7b-instruct:free"
+
 
 def call_openrouter(messages, model):
     payload = {
