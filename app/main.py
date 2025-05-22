@@ -5,6 +5,7 @@ from datetime import datetime
 from ia import summarize_text, extract_tags, ocr_image, current_timestamp
 import shutil
 from typing import List
+from functools import partial
 
 DB_PATH = "memoro.db"
 
@@ -49,6 +50,23 @@ def get_note_by_id(note_id: int):
     conn.close()
     return note
 
+def update_note(note_id: int, new_content: str, new_summary: str, new_tags: str):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("UPDATE notes SET content = ?, summary = ?, tags = ? WHERE id = ?",
+              (new_content, new_summary, new_tags, note_id))
+    conn.commit()
+    conn.close()
+
+def delete_note(note_id: int):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+    conn.commit()
+    conn.close()
+
+
+
 def main(page: ft.Page):
     page.title = "🧠 Memoro – Memória Artificial Pessoal"
     page.theme_mode = ft.ThemeMode.LIGHT
@@ -59,14 +77,191 @@ def main(page: ft.Page):
 
     upload_result = ft.Text(value="", style="bodySmall", color="green")
 
+    def abrir_dialogo(dlg: ft.AlertDialog):
+        if dlg not in page.overlay:
+            page.overlay.append(dlg)
+        dlg.open = True
+        page.update()
+
     def show_dialog(title: str, message: str):
-        page.dialog = ft.AlertDialog(
+        dialog = ft.AlertDialog(
             title=ft.Text(title, weight="bold"),
             content=ft.Text(message),
-            actions=[ft.TextButton("Fechar", on_click=lambda e: setattr(page.dialog, "open", False))],
+            actions=[ft.TextButton("Fechar", on_click=lambda e: fechar_dialog(dialog))],
         )
-        page.dialog.open = True
+        page.dialog = dialog
+        dialog.open = True
         page.update()
+
+    def fechar_dialog(dialog):
+        dialog.open = False
+        page.update()
+
+    def abrir_edicao(note_id: int, e=None):
+        print(f"Tentando abrir edição para nota {note_id}")  # Debug
+        note = get_note_by_id(note_id)
+        if not note:
+            show_dialog("Erro", "Anotação não encontrada para edição.")
+            return
+
+        content, summary, tags, _ = note
+
+        content_field = ft.TextField(
+            value=content, 
+            multiline=True, 
+            expand=True,
+            min_lines=10,
+            max_lines=20,
+            border="outline",
+            label="Conteúdo"
+        )
+        tags_field = ft.TextField(
+            value=tags, 
+            label="Tags (separadas por vírgula)",
+            border="outline",
+            helper_text="Ex: trabalho, ideias, pessoal"
+        )
+
+        def salvar_edicao(e):
+            novo_conteudo = content_field.value.strip()
+            novas_tags = tags_field.value.strip()
+            
+            if not novo_conteudo:
+                show_dialog("Erro", "O conteúdo não pode estar vazio.")
+                return
+                
+            try:
+                novo_resumo = summarize_text(novo_conteudo)
+                update_note(note_id, novo_conteudo, novo_resumo, novas_tags)
+                dlg.open = False
+                page.update()
+                show_note_details(note_id)
+                atualizar_lista()
+                show_dialog("Sucesso", "Anotação atualizada com sucesso!")
+            except Exception as err:
+                show_dialog("Erro", f"Não foi possível atualizar: {str(err)}")
+
+        dlg = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("✏️ Editar Anotação", style=ft.TextStyle(size=20, weight="bold")),
+            content=ft.Container(
+                content=ft.Column([
+                    ft.Text("Edite o conteúdo e as tags abaixo:", style="bodyMedium", color=ft.Colors.BLUE_GREY_700),
+                    ft.Container(height=10),
+                    content_field,
+                    ft.Container(height=10),
+                    tags_field
+                ], spacing=10),
+                width=650,
+                height=450,
+                padding=ft.padding.all(10)
+            ),
+            actions=[
+                ft.TextButton(
+                    "❌ Cancelar", 
+                    on_click=lambda e: fechar_dialog(dlg),
+                    style=ft.ButtonStyle(color=ft.Colors.RED_400)
+                ),
+                ft.ElevatedButton(
+                    "💾 Salvar Alterações", 
+                    on_click=salvar_edicao,
+                    icon=ft.Icons.SAVE,
+                    style=ft.ButtonStyle(bgcolor=ft.Colors.GREEN_400)
+                )
+            ],
+            actions_alignment="spaceBetween"
+        )
+        
+        abrir_dialogo(dlg)
+        print("Dialog de edição deveria estar aberto agora")  # Debug
+
+    def confirmar_exclusao(note_id: int, e=None):
+        print(f"Tentando abrir confirmação de exclusão para nota {note_id}")  # Debug
+        
+        def deletar(e):
+            try:
+                delete_note(note_id)
+                dlg.open = False
+                page.update()
+                atualizar_lista()
+                selected_note_container.content = ft.Container(
+                    content=ft.Column([
+                        ft.Icon(ft.Icons.CHECK_CIRCLE, color="green", size=50),
+                        ft.Text("✅ Anotação excluída com sucesso!", 
+                               style="titleMedium", 
+                               color=ft.Colors.GREEN_600,
+                               text_align="center")
+                    ], alignment="center", horizontal_alignment="center", spacing=15),
+                    padding=30,
+                    alignment=ft.alignment.center,
+                    bgcolor=ft.Colors.GREEN_50,
+                    border_radius=10
+                )
+                page.update()
+            except Exception as err:
+                show_dialog("Erro", f"Não foi possível excluir: {str(err)}")
+
+        dlg = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("⚠️ Confirmar Exclusão", style=ft.TextStyle(size=20, weight="bold", color=ft.Colors.RED_600)),
+            content=ft.Container(
+                content=ft.Column([
+                    ft.Icon(ft.Icons.WARNING_AMBER, color=ft.Colors.RED_600, size=60),
+                    ft.Container(height=10),
+                    ft.Text("Tem certeza que deseja excluir esta anotação permanentemente?", 
+                           style="bodyLarge", 
+                           text_align="center",
+                           color=ft.Colors.BLACK,
+                           weight="w500"),
+                    ft.Container(height=5),
+                    ft.Text("Esta ação não pode ser desfeita!", 
+                           style="bodySmall", 
+                           text_align="center",
+                           color=ft.Colors.BLACK87,
+                           italic=True)
+                ], spacing=10, horizontal_alignment="center"),
+                width=400,
+                height=250,
+                padding=ft.padding.all(20)
+            ),
+            actions=[
+                ft.TextButton(
+                    "❌ Cancelar", 
+                    on_click=lambda e: fechar_dialog(dlg),
+                    style=ft.ButtonStyle(color=ft.Colors.BLUE_600)
+                ),
+                ft.ElevatedButton(
+                    " Excluir Permanentemente", 
+                    on_click=deletar, 
+                    icon=ft.Icons.DELETE_FOREVER,
+                    style=ft.ButtonStyle(bgcolor=ft.Colors.RED_600, color=ft.Colors.WHITE)
+                )
+            ],
+            actions_alignment="spaceBetween"
+        )
+        
+        abrir_dialogo(dlg)
+        print("Dialog de exclusão deveria estar aberto agora")  # Debug
+
+    def exportar_anotacao(note_id: int):
+        note = get_note_by_id(note_id)
+        if not note:
+            show_dialog("Erro", "Anotação não encontrada.")
+            return
+
+        content, summary, tags, timestamp = note
+        filename = f"memoro_{note_id}_{timestamp[:10]}.txt"
+        export_dir = "export"
+        os.makedirs(export_dir, exist_ok=True)
+        path = os.path.join(export_dir, filename)
+
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(f"🗂 Anotação de {timestamp}\n\n")
+            f.write(f"🧠 Resumo:\n{summary}\n\n")
+            f.write(f"📄 Conteúdo:\n{content}\n\n")
+            f.write(f"🏷 Tags: {tags}\n")
+
+        show_dialog("Exportado", f"Arquivo salvo em:\n{path}")
 
     # ==== ABA 1 ====
     text_field = ft.TextField(
@@ -129,6 +324,7 @@ def main(page: ft.Page):
 
     file_picker = ft.FilePicker(on_result=handle_upload)
     page.overlay.append(file_picker)
+    selected_note_container = ft.Container(padding=10)
 
     aba_anotacao = ft.Container(
         content=ft.Column(
@@ -154,9 +350,6 @@ def main(page: ft.Page):
     search_input = ft.TextField(label="🔍 Pesquisar", on_change=lambda e: atualizar_lista())
     notas_listview = ft.ListView(expand=True, spacing=10)
 
-    def criar_on_click(note_id):
-        return lambda e: show_note_details(note_id)
-
     def atualizar_lista():
         termo = search_input.value.strip().lower()
         notas = get_all_notes()
@@ -171,16 +364,15 @@ def main(page: ft.Page):
                         title=ft.Text(summary, overflow="ellipsis", max_lines=2),
                         subtitle=ft.Text(f"🏷 {tags}"),
                         trailing=ft.Text(timestamp[:10], size=12, italic=True),
-                        on_click=criar_on_click(note_id),
+                        on_click=partial(show_note_details, note_id),
                     )
                 )
             )
         page.update()
 
-
     selected_note_container = ft.Container(padding=10)
 
-    def show_note_details(note_id: int):
+    def show_note_details(note_id: int, e=None):
         note = get_note_by_id(note_id)
         if not note:
             selected_note_container.content = ft.Text("❌ Anotação não encontrada.", color="red")
@@ -204,7 +396,27 @@ def main(page: ft.Page):
                 ft.Divider(),
                 ft.Text("🏷 Tags:", weight="bold"),
                 ft.Text(tags, italic=True, color=ft.Colors.BLUE_GREY_700),
-            ], spacing=10, scroll="auto")
+                ft.Divider(),
+                ft.Row([
+                    ft.ElevatedButton(
+                        " Editar ", 
+                        on_click=lambda e, note_id=note_id: abrir_edicao(note_id),
+                        icon=ft.Icons.EDIT,
+                        style=ft.ButtonStyle(bgcolor=ft.Colors.BLUE_50)
+                    ),
+                    ft.ElevatedButton(
+                        " Excluir ", 
+                        on_click=lambda e, note_id=note_id: confirmar_exclusao(note_id),
+                        icon=ft.Icons.DELETE,
+                        style=ft.ButtonStyle(color=ft.Colors.RED_600)
+                    ),
+                    ft.TextButton(
+                        " Exportar ", 
+                        on_click=lambda e, note_id=note_id: exportar_anotacao(note_id),
+                        icon=ft.Icons.DOWNLOAD
+                    ),
+                ], spacing=10)
+            ], spacing=10)
         )
 
         page.update()
