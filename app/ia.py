@@ -1,10 +1,11 @@
 import os
+from sentence_transformers import SentenceTransformer
 import requests
 from PIL import Image
 from datetime import datetime
 from dotenv import load_dotenv
 import pytesseract
-
+import re
 
 pytesseract.pytesseract.tesseract_cmd = r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
 os.environ["TESSDATA_PREFIX"] = r"C:\\Program Files\\Tesseract-OCR\\tessdata"
@@ -51,3 +52,16 @@ def ocr_image(image_path: str) -> str:
 
 def current_timestamp() -> str:
     return datetime.utcnow().isoformat()
+
+
+
+
+
+
+
+# Carrega modelo uma vez (pode ser global)
+model = SentenceTransformer('all-MiniLM-L6-v2')  # gratuito e rápido
+
+def generate_embedding(text: str) -> list[float]:
+    embedding = model.encode(text)
+    return embedding.tolist()

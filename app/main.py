@@ -6,66 +6,9 @@ from ia import summarize_text, extract_tags, ocr_image, current_timestamp
 import shutil
 from typing import List
 from functools import partial
-
-DB_PATH = "memoro.db"
-
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS notes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            content TEXT,
-            summary TEXT,
-            tags TEXT,
-            timestamp TEXT
-        )
-    ''')
-    conn.commit()
-    conn.close()
-
-def save_note(content: str, summary: str, tags: list[str]):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    tags_str = ", ".join(tags)
-    timestamp = current_timestamp()
-    c.execute("INSERT INTO notes (content, summary, tags, timestamp) VALUES (?, ?, ?, ?)",
-              (content, summary, tags_str, timestamp))
-    conn.commit()
-    conn.close()
-
-def get_all_notes():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT id, summary, tags, timestamp FROM notes ORDER BY timestamp DESC")
-    rows = c.fetchall()
-    conn.close()
-    return rows
-
-def get_note_by_id(note_id: int):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT content, summary, tags, timestamp FROM notes WHERE id=?", (note_id,))
-    note = c.fetchone()
-    conn.close()
-    return note
-
-def update_note(note_id: int, new_content: str, new_summary: str, new_tags: str):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("UPDATE notes SET content = ?, summary = ?, tags = ? WHERE id = ?",
-              (new_content, new_summary, new_tags, note_id))
-    conn.commit()
-    conn.close()
-
-def delete_note(note_id: int):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("DELETE FROM notes WHERE id = ?", (note_id,))
-    conn.commit()
-    conn.close()
-
-
+from ia import generate_embedding
+from embeddings import buscar_semanticamente
+from db import save_note,get_notes_grouped_by_day,ensure_embedding_column_exists,delete_note,update_note,get_note_by_id,get_all_notes,adicionar_coluna_embedding,init_db
 
 def main(page: ft.Page):
     page.title = "🧠 Memoro – Memória Artificial Pessoal"
@@ -284,7 +227,8 @@ def main(page: ft.Page):
             summary = summarize_text(content)
             tags = extract_tags(content)
 
-            save_note(content, summary, tags)
+            embedding = generate_embedding(content)
+            save_note(content, summary, tags, embedding)
 
             summary_label.value = f"🧠 Resumo:\n{summary}"
             tags_label.value = f"🏷 Tags: {', '.join(tags)}"
@@ -345,14 +289,49 @@ def main(page: ft.Page):
         padding=20,
         expand=True
     )
+    from db import get_notes_grouped_by_day  # certifique-se de importar isso no topo se ainda não tiver
 
+    timeline_column = ft.Column(scroll="auto", spacing=20)
+
+    def atualizar_timeline():
+        timeline_column.controls.clear()
+        grouped_notes = get_notes_grouped_by_day()
+
+        for data, notas in grouped_notes.items():
+            timeline_column.controls.append(
+                ft.Text(f"📅 {data}", style="titleMedium", weight="bold")
+            )
+            for note_id, summary, tags, timestamp in notas:
+                timeline_column.controls.append(
+                    ft.Card(
+                        content=ft.ListTile(
+                            title=ft.Text(summary),
+                            subtitle=ft.Text(f"🏷 {tags}"),
+                            trailing=ft.Text(timestamp[11:16]),
+                            on_click=lambda e, nid=note_id: show_note_details(nid)
+                        )
+                    )
+                )
+        page.update()
+
+    aba_timeline = ft.Container(
+        content=timeline_column,
+        padding=20,
+        expand=True
+    )
+    
     # ==== ABA 2 ====
     search_input = ft.TextField(label="🔍 Pesquisar", on_change=lambda e: atualizar_lista())
     notas_listview = ft.ListView(expand=True, spacing=10)
 
     def atualizar_lista():
         termo = search_input.value.strip().lower()
-        notas = get_all_notes()
+        if termo:
+            nota_ids = buscar_semanticamente(termo)
+            todas = get_all_notes()
+            notas = [n for n in todas if n[0] in nota_ids]
+        else:
+            notas = get_all_notes()
 
         notas_listview.controls.clear()
         for note_id, summary, tags, timestamp in notas:
@@ -441,12 +420,20 @@ def main(page: ft.Page):
         tabs=[
             ft.Tab(text="✍️ Nova Anotação", content=aba_anotacao),
             ft.Tab(text="📁 Ver Anotações", content=aba_listagem),
+            ft.Tab(text="🗓 Timeline", content=aba_timeline),
         ]
     )
 
+
+
+
     page.add(tabs)
     atualizar_lista()
+    atualizar_timeline()
 
 if __name__ == "__main__":
     init_db()
+    ensure_embedding_column_exists()
+    adicionar_coluna_embedding()
+
     ft.app(target=main)

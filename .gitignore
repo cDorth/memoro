@@ -7,11 +7,9 @@ __pycache__/
 
 # Ignora o banco de dados local
 memoro.db
-
 # Ignora arquivos do sistema
 .DS_Store
 Thumbs.db
-
 # Ignora arquivos temporários
 *.log
 *.tmp
