@@ -74,7 +74,7 @@ memoro/
 
 ### 1. Clone o repositório
 ```bash
-git clone https://github.com/seu-usuario/memoro.git
+git clone https://github.com/cDorth/memoro.git
 cd memoro
 ```
 
